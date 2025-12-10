@@ -1,44 +1,22 @@
-# backend/app.py → MySQL VERSION
+# backend/app.py → FINAL TESTED & WORKING VERSION (Dec 2025)
 
 import os
 import sys
+from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-
 from dotenv import load_dotenv
-import pymysql
-from pymysql.cursors import DictCursor
 
 from models.user import User, init_db
 from utils.compliance_rules import get_requirements
 
-# ==================== ENV & DB HELPER ====================
-
-load_dotenv()  # loads .env file if present
-
-def get_db_connection():
-    """
-    Create a new MySQL connection using env vars.
-    Used here for the delete-document endpoint.
-    (User model will use similar logic inside models/user.py)
-    """
-    conn = pymysql.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER", "myuser"),
-        password=os.getenv("DB_PASSWORD", "mypassword"),
-        database=os.getenv("DB_NAME", "compliance_app"),
-        charset="utf8mb4",
-        cursorclass=DictCursor,
-    )
-    return conn
-
-# ==================== FLASK APP ====================
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = "compliance-final-2025"
+app.secret_key = os.getenv("SECRET_KEY", "super-secret-compliance-2025")
 CORS(app, supports_credentials=True)
 
 # Uploads folder
@@ -46,21 +24,26 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# Initialize DB + Login Manager
 init_db()
 login_manager = LoginManager(app)
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.get(user_id)
+    return User.get(int(user_id)) if user_id else None
 
 # ==================== AUTH ====================
 
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
-    if User.create(data.get("username"), data.get("password")):
-        return jsonify({"message": "Registered"})
-    return jsonify({"error": "Username taken"}), 400
+    username = data.get("username")
+    password = data.get("password")
+    if not username or not password:
+        return jsonify({"error": "username and password required"}), 400
+    if User.create(username, password):
+        return jsonify({"message": "Registered successfully"})
+    return jsonify({"error": "Username already taken"}), 400
 
 @app.route("/api/login", methods=["POST"])
 def login():
@@ -69,7 +52,7 @@ def login():
     if user:
         login_user(user)
         return jsonify({"message": "Logged in", "username": user.username})
-    return jsonify({"error": "Wrong credentials"}), 401
+    return jsonify({"error": "Invalid credentials"}), 401
 
 @app.route("/api/logout", methods=["POST"])
 @login_required
@@ -90,34 +73,71 @@ def check():
     )
     return jsonify(result)
 
-# ==================== UPLOAD ====================
+# ==================== UPLOAD (NOW SAVES FULL FILENAME) ====================
 
 @app.route("/api/upload", methods=["POST"])
 @login_required
 def upload_document():
     if 'file' not in request.files:
-        return jsonify({"error": "No file"}), 400
+        return jsonify({"error": "No file part"}), 400
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
+        return jsonify({"error": "No selected file"}), 400
 
-    doc_name = request.form.get("document_name")
-    full_filename = f"{current_user.id}_{doc_name.replace(' ', '_')}_{file.filename}"
+    doc_name = request.form.get("document_name") or "unnamed"
+    safe_doc_name = doc_name.replace(' ', '_')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    full_filename = f"{current_user.id}_{safe_doc_name}_{timestamp}_{file.filename}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], full_filename)
     file.save(filepath)
 
-    # Save only prefix in DB
-    prefix = f"{current_user.id}_{doc_name.replace(' ', '_')}_"
+    # Save the FULL filename in DB (critical!)
     User.save_document(
         current_user.id,
         request.form.get("country"),
-        request.form.get("entity"),
-        request.form.get("product"),
+        request.form.get("entity_type") or request.form.get("entity"),
+        request.form.get("product_category") or request.form.get("product"),
         doc_name,
-        prefix
+        full_filename                      # ← This matches your new models/user.py
     )
+    return jsonify({"message": "Uploaded successfully"})
 
-    return jsonify({"message": "Uploaded"})
+# ==================== MY DOCUMENTS ====================
+
+@app.route("/api/my-documents", methods=["GET"])
+@login_required
+def my_documents():
+    docs = User.get_uploaded_docs(current_user.id)
+    # Return just the document names for your frontend (exactly what it expects)
+    return jsonify({"uploaded": [d["document_name"] for d in docs]})
+
+# ==================== DOWNLOAD / PREVIEW (NOW 100% RELIABLE) ====================
+
+@app.route("/download/<doc_name>")
+@login_required
+def preview_file(doc_name):
+    docs = User.get_uploaded_docs(current_user.id)
+    matching = [d for d in docs if d["document_name"] == doc_name]
+    if not matching:
+        return "File not found", 404
+    filename = matching[0]["file_path"]
+    full_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if not os.path.exists(full_path):
+        return "File not found", 404
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=False)
+
+@app.route("/download-attachment/<doc_name>")
+@login_required
+def download_file_route(doc_name):
+    docs = User.get_uploaded_docs(current_user.id)
+    matching = [d for d in docs if d["document_name"] == doc_name]
+    if not matching:
+        return "File not found", 404
+    filename = matching[0]["file_path"]
+    full_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if not os.path.exists(full_path):
+        return "File not found", 404
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
 
 # ==================== DELETE ====================
 
@@ -127,52 +147,31 @@ def delete_document():
     data = request.get_json() or {}
     doc_name = data.get("document_name")
     if not doc_name:
-        return jsonify({"error": "No document name"}), 400
+        return jsonify({"error": "document_name required"}), 400
 
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM documents WHERE user_id = %s AND document_name = %s",
-                (current_user.id, doc_name),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+    # Delete file from disk
+    docs = User.get_uploaded_docs(current_user.id)
+    matching = [d for d in docs if d["document_name"] == doc_name]
+    if matching:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], matching[0]["file_path"])
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
-    return jsonify({"message": "Deleted"})
+    # Delete from DB
+    User.delete_document(current_user.id, doc_name)
+    return jsonify({"message": "Deleted successfully"})
 
-@app.route("/api/my-documents", methods=["GET"])
-@login_required
-def my_documents():
-    uploaded = User.get_uploaded_docs(current_user.id)
-    return jsonify({"uploaded": uploaded})
+# ==================== HEALTH ====================
 
-# ==================== FINAL ROUTES: PREVIEW & DOWNLOAD ====================
-
-@app.route("/download/<doc_name>")
-@login_required
-def preview_file(doc_name):
-    prefix = f"{current_user.id}_{doc_name.replace(' ', '_')}_"
-    for f in os.listdir(app.config['UPLOAD_FOLDER']):
-        if f.startswith(prefix):
-            return send_from_directory(app.config['UPLOAD_FOLDER'], f, as_attachment=False)
-    return "File not found", 404
-
-@app.route("/download-attachment/<doc_name>")
-@login_required
-def download_file_route(doc_name):
-    prefix = f"{current_user.id}_{doc_name.replace(' ', '_')}_"
-    for f in os.listdir(app.config['UPLOAD_FOLDER']):
-        if f.startswith(prefix):
-            return send_from_directory(app.config['UPLOAD_FOLDER'], f, as_attachment=True)
-    return "File not found", 404
+@app.route("/health")
+def health():
+    return "OK", 200
 
 # ==================== RUN ====================
 
 if __name__ == "__main__":
-    print("COMPLIANCE ADVISOR - FINAL VERSION (MySQL)")
-    print("Preview → /download/Name")
-    print("Download → /download-attachment/Name")
-    print("http://localhost:5000")
-    app.run(port=5000, debug=True)
+    print("\nCOMPLIANCE ADVISOR IS RUNNING!")
+    print("→ Register: POST /api/register")
+    print("→ Login   : POST /api/login")
+    print("→ Visit your frontend (usually http://localhost:3000)\n")
+    app.run(host="0.0.0.0", port=5000, debug=True)
