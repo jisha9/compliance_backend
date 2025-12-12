@@ -17,7 +17,17 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-compliance-2025")
-CORS(app, supports_credentials=True)
+'''CORS(app,origins=["http://isha-alb-160568039.us-west-1.elb.amazonaws.com:5100","http://127.0.0.1:5100"], supports_credentials=True)
+'''
+# In app.py - replace your current CORS line with:
+# allow both your dev ports (5100 for one frontend, 5173 for Vite)
+CORS(app, origins=[
+    "http://isha-alb-160568039.us-west-1.elb.amazonaws.com:5100",
+    "http://localhost:5100",
+    "http://127.0.0.1:5100",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+], supports_credentials=True)
 
 # Uploads folder
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
@@ -169,9 +179,33 @@ def health():
 
 # ==================== RUN ====================
 
-if __name__ == "__main__":
+'''if __name__ == "__main__":
     print("\nCOMPLIANCE ADVISOR IS RUNNING!")
     print("→ Register: POST /api/register")
     print("→ Login   : POST /api/login")
     print("→ Visit your frontend (usually http://localhost:3000)\n")
+    app.run(host="0.0.0.0", port=5000, debug=True)'''
+    
+if __name__ == "__main__":
+    print("\n" + "="*50)
+    print("COMPLIANCE ADVISOR BACKEND API")
+    print("="*50)
+    print("✅ BACKEND: http://localhost:5000")
+    print("✅ ALLOWS FRONTEND: http://localhost:5100")
+    print("\n📋 API ENDPOINTS:")
+    print("  • POST   /api/register")
+    print("  • POST   /api/login")
+    print("  • POST   /api/check")
+    print("  • POST   /api/upload")
+    print("  • GET    /api/my-documents")
+    print("  • GET    /download/<doc_name>")
+    print("  • POST   /api/delete-document")
+    print("  • GET    /health")
+    print("\n🚀 FRONTEND SETUP:")
+    print("  - Run frontend on: http://localhost:5100")
+    print("  - Make API calls to: http://localhost:5000")
+    print("\n🌐 PRODUCTION (ALB):")
+    print("  - Frontend: http://isha-alb-160568039.us-west-1.elb.amazonaws.com:5100")
+    print("  - API calls route to backend:5000")
+    print("="*50 + "\n")
     app.run(host="0.0.0.0", port=5000, debug=True)
