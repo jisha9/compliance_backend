@@ -22,7 +22,7 @@ app.secret_key = os.getenv("SECRET_KEY", "super-secret-compliance-2025")
 # In app.py - replace your current CORS line with:
 # allow both your dev ports (5100 for one frontend, 5173 for Vite)
 CORS(app, origins=[
-    "http://isha-alb-160568039.us-west-1.elb.amazonaws.com:5100",
+    "isha-doc-alb-604218210.us-west-1.elb.amazonaws.com",
     "http://localhost:5100",
     "http://127.0.0.1:5100",
     "http://localhost:5173",
