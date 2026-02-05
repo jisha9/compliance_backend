@@ -175,7 +175,7 @@ def delete_document():
 
 @app.route("/health")
 def health():
-    return "OoKK", 200
+    return "OoKK1", 200
 
 # ==================== RUN ====================
 
