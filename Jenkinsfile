@@ -2,15 +2,15 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = "us-west-1"
-        ECR_REPO = "666696661271.dkr.ecr.us-west-1.amazonaws.com/compliance-backend"
-        IMAGE_NAME = "compliance-backend"
-        SERVICE_NAME = "backend"
+        REGION = "us-west-1"
+        ACCOUNT_ID = "666696661271"
+        IMAGE = "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/compliance-backend:latest"
+        SERVICE = "backend"
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
                 checkout scm
             }
@@ -18,51 +18,44 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh '''
-                docker build -t $IMAGE_NAME .
-                '''
+                sh """
+                docker build -t compliance-backend .
+                docker tag compliance-backend:latest $IMAGE
+                """
             }
         }
 
-        stage('Tag Image') {
+        stage('Login to ECR') {
             steps {
-                sh '''
-                docker tag $IMAGE_NAME:latest $ECR_REPO:latest
-                '''
+                sh """
+                aws ecr get-login-password --region $REGION | \
+                docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com
+                """
             }
         }
 
-        stage('Login to AWS ECR') {
+        stage('Push Image') {
             steps {
-                sh '''
-                aws ecr get-login-password --region $AWS_REGION | \
-                docker login --username AWS --password-stdin 666696661271.dkr.ecr.us-west-1.amazonaws.com
-                '''
+                sh "docker push $IMAGE"
             }
         }
 
-        stage('Push Image to ECR') {
+        stage('Deploy to Swarm') {
             steps {
-                sh '''
-                docker push $ECR_REPO:latest
-                '''
-            }
-        }
-
-        stage('Deploy to Docker Swarm') {
-            steps {
-                sh '''
+                sh """
                 docker service update \
-                --image $ECR_REPO:latest \
-                --update-parallelism 1 \
-                --update-delay 10s \
-                $SERVICE_NAME \
-                || docker service create \
-                --name $SERVICE_NAME \
-                --publish 5000:5000 \
+                --with-registry-auth \
+                --image $IMAGE \
+                $SERVICE || \
+                
+                docker service create \
+                --with-registry-auth \
+                --name $SERVICE \
                 --replicas 2 \
-                $ECR_REPO:latest
-                '''
+                --publish 5000:5000 \
+                --network compliance-network \
+                $IMAGE
+                """
             }
         }
     }
